@@ -19,6 +19,7 @@ class ucf101Dataset:
     self._seq_length = seq_length
     self._val_ratio = 0.1 # Number of validation samples picked from the training set
     self._batch_size = batch_size
+    self._num_classes = 101
 
     # csv files which contain all the training, validation and test sequences possible
     self._train_seq_pkl = os.path.abspath('train_seq.csv')
@@ -33,6 +34,8 @@ class ucf101Dataset:
       frags = e.split(' ')
       self._class_ind_dict[frags[1]] = int(frags[0])-1
 
+  def get_numclasses(self):
+    return self._num_classes
 
   def load_splits(self):
     """ Populate internal datastructures from the ucf101 splitfiles"""

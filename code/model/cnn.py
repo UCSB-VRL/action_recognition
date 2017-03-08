@@ -47,7 +47,7 @@ class featureExtractor:
   def __init__(self, cnn_name='vgg16', batch_size=16):
     self._cnn_name = cnn_name
     self._b_size = batch_size
-    self._loader_workers = max(batch_size // 4, 1)
+    self._loader_workers = max(batch_size // 2, 1)
   
   def create_cnn(self):
     print 'Creating CNN of type  %s '%(self._cnn_name),
@@ -57,13 +57,20 @@ class featureExtractor:
       self._cnn = vgg16
       self._cnn.classifier = nn.Sequential(
         *list(vgg16.classifier.children())[:-1]) #to get hold of fc7
+    elif self._cnn_name == 'resnet152':
+      resnet = getattr(models, 'resnet152')(pretrained=True)
+      self._cnn = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu, 
+                                resnet.maxpool, resnet.layer1, resnet.layer2, 
+                                resnet.layer3, resnet.layer4, resnet.avgpool)      
     else:
       print 'CNN architecture of type : %s not currently implemented'%self._cnn_name
       assert 0
     print ' ... created in %6f seconds'%(time.time()-t1)
     self._cnn.eval()
     self._cnn.cuda()
-    
+
+
+
     return self._cnn
 
   def create_dataloader(self, sequences, split_type='train'):
