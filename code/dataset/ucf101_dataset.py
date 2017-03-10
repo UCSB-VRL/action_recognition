@@ -77,7 +77,7 @@ class ucf101Dataset:
 
     if os.path.exists(pkl_file):
       print 'Pickle file for subset %s with dataframe is already present at %s'%(split_type, pkl_file)
-      return
+      return False
 
     print 'Preparing the csv file %s for subset : %s ....'%(pkl_file, split_type)
     seq_imgcolumns_lists = []
@@ -108,6 +108,7 @@ class ucf101Dataset:
     for x in range(0, self._seq_length):
       df['image_%03d'%x] = seq_imgcolumns_lists[x]
     df.to_csv(pkl_file, header=None, index=False)
+    return True
 
 
 
