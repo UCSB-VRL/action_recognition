@@ -26,6 +26,15 @@ class ucf101Dataset:
     self._val_seq_pkl = os.path.abspath('val_seq.csv')
     self._test_seq_pkl = os.path.abspath('test_seq.csv')
 
+    self._train_imglist_file = os.path.abspath('train_imglist.csv')
+    self._test_imglist_file = os.path.abspath('test_imglist.csv')
+    self._val_imglist_file = os.path.abspath('val_imglist.csv')
+
+    self._train_images = []
+    self._test_images = []
+    self._val_images = []
+
+
 
     self._class_ind_dict = {}
     with open(class_indfile, 'r') as f:
@@ -39,23 +48,36 @@ class ucf101Dataset:
 
   def load_splits(self):
     """ Populate internal datastructures from the ucf101 splitfiles"""
-    with open(self._test_splitfile, 'r') as f:
-      videos = f.read().splitlines()
-    self._test_videos_folders = [os.path.join(self._data_root, v.split('.')[0]) for v in videos]
-    self._test_video_labels = [self._class_ind_dict[v.split('/')[0]] for v in videos]
+    if self._test_splitfile is not None:
+      with open(self._test_splitfile, 'r') as f:
+        videos = f.read().splitlines()
+      self._test_videos_folders = [os.path.join(self._data_root, v.split('.')[0]) for v in videos]
+      self._test_video_labels = [self._class_ind_dict[v.split('/')[0]] for v in videos]
 
-    with open(self._train_splitfile, 'r') as f:
-      videos = f.read().splitlines()
-    random.seed(0)
-    random.shuffle(videos)
+    if self._train_splitfile is not None:
+      with open(self._train_splitfile, 'r') as f:
+        videos = f.read().splitlines()
+      random.seed(0)
+      random.shuffle(videos)
 
-    val_videos = videos[:int(self._val_ratio*len(videos))]
-    self._val_videos_folders = [os.path.join(self._data_root, v.split('.')[0]) for v in val_videos]
-    self._val_video_labels = [self._class_ind_dict[v.split('/')[0]] for v in val_videos]
+      val_videos = videos[:int(self._val_ratio*len(videos))]
+      self._val_videos_folders = [os.path.join(self._data_root, v.split('.')[0]) for v in val_videos]
+      self._val_video_labels = [self._class_ind_dict[v.split('/')[0]] for v in val_videos]
 
-    train_videos = videos[int(self._val_ratio*len(videos)):]
-    self._train_videos_folders = [os.path.join(self._data_root, v.split('.')[0]) for v in train_videos]
-    self._train_video_labels = [self._class_ind_dict[v.split('/')[0]] for v in train_videos]
+      train_videos = videos[int(self._val_ratio*len(videos)):]
+      self._train_videos_folders = [os.path.join(self._data_root, v.split('.')[0]) for v in train_videos]
+      self._train_video_labels = [self._class_ind_dict[v.split('/')[0]] for v in train_videos]
+
+  def get_videodata(self, split_type='train'):
+    assert split_type in ['train', 'val', 'test']
+
+    if split_type == 'train':
+      return self._train_videos_folders, self._train_video_labels
+    elif split_type == 'val':
+      return self._val_videos_folders, self._val_video_labels
+    else:
+      return self._test_videos_folders, self._test_video_labels
+
 
 
   def create_seq_pkl(self, split_type='train'):
@@ -63,20 +85,24 @@ class ucf101Dataset:
 
     if split_type == 'train':
       pkl_file = self._train_seq_pkl
+      imglist_file = self._train_imglist_file
       video_folders = self._train_videos_folders
       video_labels = self._train_video_labels
     elif split_type == 'val':
       pkl_file = self._val_seq_pkl
+      imglist_file = self._val_imglist_file
       video_folders = self._val_videos_folders
       video_labels = self._val_video_labels
     else:
       pkl_file = self._test_seq_pkl
+      imglist_file = self._test_imglist_file
       video_folders = self._test_videos_folders
       video_labels = self._test_video_labels
 
 
-    if os.path.exists(pkl_file):
-      print 'Pickle file for subset %s with dataframe is already present at %s'%(split_type, pkl_file)
+    if os.path.exists(pkl_file) and os.path.exists(imglist_file):
+      print 'Pickle files for subset %s with dataframe are already present at %s, %s'%(split_type, pkl_file,
+                                                                                       imglist_file)
       return False
 
     print 'Preparing the csv file %s for subset : %s ....'%(pkl_file, split_type)
@@ -85,13 +111,20 @@ class ucf101Dataset:
       seq_imgcolumns_lists.append([])
 
     df = pd.DataFrame()
+    imglist_df = pd.DataFrame()
 
     seq_label_lists = []
+    split_images = []
+    split_image_labels = []
     for f_idx, f in enumerate(video_folders):
       if (f_idx%100 == 0):
         print '\r %s %06d/%06d'%(split_type, f_idx, len(video_folders)),
+        sys.stdout.flush()
+
       images = _get_imglist(f)
       images.sort()
+      split_images.extend(images)
+      split_image_labels.extend([video_labels[f_idx]]*len(images))
       if split_type == 'train':
         seq_startlocs = range(0, len(images)-self._seq_length, self._seq_length//4)
       else:
@@ -108,6 +141,12 @@ class ucf101Dataset:
     for x in range(0, self._seq_length):
       df['image_%03d'%x] = seq_imgcolumns_lists[x]
     df.to_csv(pkl_file, header=None, index=False)
+    
+    imglist_df['label'] = split_image_labels
+    imglist_df['images'] = split_images
+    imglist_df.to_csv(imglist_file, header=None, index=None)
+
+
     return True
 
 
@@ -128,6 +167,56 @@ class ucf101Dataset:
       data = f.read().splitlines()
     print ' ... loaded in %6f seconds'%(time.time()-t1)
     return data
+
+
+  def load_imglist_data(self, split_type='train'):
+    assert split_type in ['train', 'val', 'test']
+
+    if split_type == 'train':
+      pkl_file = self._train_imglist_file
+    elif split_type == 'val':
+      pkl_file = self._val_imglist_file
+    else:
+      pkl_file = self._test_imglist_file
+
+    print 'Loading image list data for subset %s from %s'%(split_type, pkl_file),
+    t1 = time.time()
+    with open(pkl_file, 'r') as f:
+      data = f.read().splitlines()
+    print ' ... loaded in %6f seconds'%(time.time()-t1)
+    sys.stdout.flush()
+    return data
+  
+  
+
+
+  def create_video_imgseqs(self, split_type='train', vid_idx=0):
+    """For a given video, create a sequence of frames with given sequence length and corresponding stride"""
+    assert split_type in ['train', 'val', 'test']
+
+    if split_type == 'train':
+      video_folder = self._train_videos_folders[vid_idx]
+      video_label = self._train_video_labels[vid_idx]
+    elif split_type == 'val':
+      video_folder = self._val_videos_folders[vid_idx]
+      video_label = self._val_video_labels[vid_idx]
+    else:
+      video_folder = self._test_videos_folders[vid_idx]
+      video_label = self._test_video_labels[vid_idx]
+
+
+    images = glob(os.path.join(video_folder, '*.jpg'))
+    images.sort()
+
+    seq_start_locs = range(0, len(images)-self._seq_length, self._seq_length//2)
+    img_seqs = []
+    for l in seq_start_locs:
+      s = str(video_label)
+      for x in images[l:l+self._seq_length]:
+        s = s + ',' + x
+      img_seqs.append(s)
+
+    return img_seqs, video_label
 
 
 
