@@ -48,6 +48,36 @@ class ImageSequenceList(data.Dataset):
         return len(self.seqs)
 
 
+class ImageList(data.Dataset):
+    def __init__(self, data, root='', for_train=False):
+        print('number of samples', len(data))
+
+        self.root = root
+        self.imgs = data
+        self.mean = [0.485, 0.456, 0.406]
+        self.std = [0.229, 0.224, 0.225]
+
+
+    def __getitem__(self, index):
+        frags = self.imgs[index].split(',')
+        path = frags[1]
+        label = int(frags[0])
+
+        image = io.imread(os.path.join(self.root, path))
+        image = imresize(image, (224, 224), 3)
+        image = image.astype('float32')/255.0
+        image -= self.mean
+        image /= self.std
+        image = np.transpose(image, (2, 0, 1))
+
+        return torch.from_numpy(image), label, path
+
+    def __len__(self):
+        return len(self.imgs)
+
+
+
+
 class FeatureSequenceList(data.Dataset):
   def __init__(self, data, root='', for_train=False):
     print('number of samples', len(data))
@@ -100,7 +130,7 @@ class featureExtractor:
 
     return self._cnn
 
-  def create_dataloader(self, sequences, split_type='train', data_type='image'):
+  def create_dataloader(self, sequences, split_type='train', data_type='image', batch_size=None):
     assert split_type in  ['train', 'val', 'test']
     if split_type =='train':
       _for_train = True
@@ -109,17 +139,28 @@ class featureExtractor:
       _for_train = False
       _shuffle = False
 
-    assert data_type in ['image', 'features']
-    if data_type == 'image':
-      self._data_loader = torch.utils.data.DataLoader(ImageSequenceList(sequences,'', for_train=_for_train),
-                                                      batch_size=self._b_size, shuffle=_shuffle,
-                                                      num_workers=self._loader_workers, pin_memory=True)
+    if isinstance(batch_size, int):
+      bsize = batch_size
+      load_workers = bsize
     else:
-      self._data_loader = torch.utils.data.DataLoader(FeatureSequenceList(sequences,'', for_train=_for_train),
-                                                      batch_size=self._b_size, shuffle=_shuffle,
-                                                      num_workers=self._loader_workers, pin_memory=True)
-    return self._data_loader
+      bsize = self._b_size
+      load_workers = self._loader_workers
 
+    assert data_type in ['image_seq', 'feature', 'image']
+
+    if data_type == 'image_seq':
+      _data_loader = torch.utils.data.DataLoader(ImageSequenceList(sequences,'', for_train=_for_train),
+                                                      batch_size=bsize, shuffle=_shuffle,
+                                                      num_workers=load_workers, pin_memory=True)
+    elif data_type == 'feature':
+      _data_loader = torch.utils.data.DataLoader(FeatureSequenceList(sequences,'', for_train=_for_train),
+                                                      batch_size=bsize, shuffle=_shuffle,
+                                                      num_workers=load_workers, pin_memory=True)
+    else:
+      _data_loader = torch.utils.data.DataLoader(ImageList(sequences,'', for_train=_for_train),
+                                                      batch_size=bsize, shuffle=_shuffle,
+                                                      num_workers=load_workers, pin_memory=True)
+    return _data_loader
 
 
 
