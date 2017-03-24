@@ -7,21 +7,18 @@ import torchvision.models as models
 import imageio as io
 import os
 import sys, time
-
 import pandas as pd
-
 from skimage.transform import resize as imresize
+from pedataloader import PEDataLoader
 
 
 class ImageSequenceList(data.Dataset):
     def __init__(self, data, root='', for_train=False):
         print('number of samples', len(data))
-
         self.root = root
         self.seqs = data
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
-
 
     def __getitem__(self, index):
         frags = self.seqs[index].split(',')
@@ -43,6 +40,9 @@ class ImageSequenceList(data.Dataset):
         seq_images = torch.stack(seq_images)
         assert len(set(folder_names)) == 1, 'All images in a sequence need to be from the same folder!'
         return seq_images, label, folder_names[0]
+    
+    def __call__(self, index):
+      return self.__getitem__(index)
 
     def __len__(self):
         return len(self.seqs)
@@ -51,12 +51,10 @@ class ImageSequenceList(data.Dataset):
 class ImageList(data.Dataset):
     def __init__(self, data, root='', for_train=False):
         print('number of samples', len(data))
-
         self.root = root
         self.imgs = data
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
-
 
     def __getitem__(self, index):
         frags = self.imgs[index].split(',')
@@ -72,6 +70,9 @@ class ImageList(data.Dataset):
 
         return torch.from_numpy(image), label, path
 
+    def __call__(self, index):
+      return self.__getitem__(index)
+
     def __len__(self):
         return len(self.imgs)
 
@@ -81,7 +82,6 @@ class ImageList(data.Dataset):
 class FeatureSequenceList(data.Dataset):
   def __init__(self, data, root='', for_train=False):
     print('number of samples', len(data))
-
     self.root = root
     self.seq_files = data
 
@@ -94,7 +94,10 @@ class FeatureSequenceList(data.Dataset):
     numpy_arr = np.load(numpy_fpath)
     seq_data = torch.from_numpy(numpy_arr)
 
-    return seq_data, label, ''
+    return seq_data, label, numpy_fpath
+
+  def __call__(self, index):
+    return self.__getitem__(index)
 
   def __len__(self):
     return len(self.seq_files)
@@ -150,16 +153,19 @@ class featureExtractor:
 
     if data_type == 'image_seq':
       _data_loader = torch.utils.data.DataLoader(ImageSequenceList(sequences,'', for_train=_for_train),
-                                                      batch_size=bsize, shuffle=_shuffle,
-                                                      num_workers=load_workers, pin_memory=True)
+                                                 batch_size=bsize, shuffle=_shuffle,
+                                                 num_workers=load_workers, pin_memory=True)
+
     elif data_type == 'feature':
       _data_loader = torch.utils.data.DataLoader(FeatureSequenceList(sequences,'', for_train=_for_train),
-                                                      batch_size=bsize, shuffle=_shuffle,
-                                                      num_workers=load_workers, pin_memory=True)
+                                                 batch_size=bsize, shuffle=_shuffle,
+                                                 num_workers=load_workers, pin_memory=True)
+
     else:
       _data_loader = torch.utils.data.DataLoader(ImageList(sequences,'', for_train=_for_train),
-                                                      batch_size=bsize, shuffle=_shuffle,
-                                                      num_workers=load_workers, pin_memory=True)
+                                                 batch_size=bsize, shuffle=_shuffle,
+                                                 num_workers=load_workers, pin_memory=True)
+
     return _data_loader
 
 
