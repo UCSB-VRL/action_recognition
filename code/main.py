@@ -252,7 +252,6 @@ def train():
   zero_batch_time = time.time()
 
   for batch_idx, (train_seq, train_label, _) in enumerate(traindata_loader):
-
     num_batchsamples = train_seq.size(0)
     hidden = lstm_model.init_hidden(num_batchsamples)
     lstm_label = Variable(torch.cat([train_label.unsqueeze(0)] * args.sequence_length).view(-1).cuda())
