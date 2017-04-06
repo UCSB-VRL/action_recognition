@@ -12,7 +12,7 @@ import glob
 import pandas as pd
 from tensorflow.core.framework import summary_pb2
 import tensorflow as tf
-
+import collections
 
 parser = argparse.ArgumentParser(description='Train or eval action recognition through LSTMs')
 parser.add_argument('--dataset-root', action="store", dest='dataset_root',
@@ -35,8 +35,6 @@ parser.add_argument('--nhid', type=int, default=200, dest='nhid',
                     help='number of hidden units per layer in LSTM')
 parser.add_argument('--nlayers', type=int, default=1, dest='nlayers',
                     help='number of layers in LSTM')
-parser.add_argument('--seed', type=int, default=1111,
-                    help='random seed')
 parser.add_argument('--log-interval', type=int, default=20, dest='log_interval',
                     help='report interval')
 parser.add_argument('--lr', type=float, default=0.01,
@@ -59,6 +57,8 @@ parser.add_argument('--lstm-dropout', default=0.0, type=float, dest='lstm_dropou
                     help='LSTM dropout factor')
 parser.add_argument('--lstm-init', default='uniform', type=str, dest='lstm_init',
                     help='type of init for LSTM decoder')
+parser.add_argument('--run-name', default='', type=str, dest='run_name',
+                    help='Run name')
 
 
 args = parser.parse_args()
@@ -68,24 +68,22 @@ for x in args.__dict__.keys():
   print str(x) + ' : ' + str(args.__dict__[x])
 print('=' * 89)
 
-# Set the random seed manually for reproducibility.
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
 
 feat_size_map = { 'vgg16': 4096,
                   'resnet152': 2048
                 }
 
 
-dataset = ucf101_dataset.ucf101Dataset(data_root=args.dataset_root, test_splitfile=args.test_splitfile,
-                                        train_splitfile=args.train_splitfile, class_indfile=args.class_indexfile,
-                                       seq_length=args.sequence_length, batch_size=args.batch_size)
+dataset = ucf101_dataset.ucf101Dataset(data_root=args.dataset_root, 
+                                       test_splitfile=args.test_splitfile,
+                                       train_splitfile=args.train_splitfile, 
+                                       class_indfile=args.class_indexfile,
+                                       seq_length=args.sequence_length, 
+                                       batch_size=args.batch_size)
 dataset.load_splits()
 dataset.create_seq_pkl(split_type='train')
 dataset.create_seq_pkl(split_type='val')
 dataset.create_seq_pkl(split_type='test')
-
-
 
 feature_extractor = cnn.featureExtractor(cnn_name=args.feature_extractortype, batch_size=args.batch_size)
 feature_cnn = feature_extractor.create_cnn()
@@ -97,13 +95,14 @@ if os.path.exists(feature_meanfile):
   featmean_present = True
   feature_mean = np.load(feature_meanfile)
   feature_mean = torch.Tensor(feature_mean).unsqueeze(0).repeat(args.sequence_length, 1, 1).cuda()
+  print 'INFO: Loaded feature mean from : %s'%feature_meanfile
+else:
+   print 'INFO: No mean file found at %s'%feature_meanfile
 
 def add_summary(tag, raw_value, global_step):
   value = summary_pb2.Summary.Value(tag=tag, simple_value=raw_value)
   summary = summary_pb2.Summary(value=[value])
   tf_summary_writer.add_summary(summary, global_step)
-
-
 
 assert args.operation_mode in ['feature', 'image', 'image_seq']
 print 'Mode of operation : %s'%args.operation_mode.upper()
@@ -204,7 +203,14 @@ if args.operation_mode == 'feature':
 
   traindata_loader = feature_dataloaders[split_nameidx_map['train']]
   testdata_loader = feature_dataloaders[split_nameidx_map['test']]
-  valdata_loader = feature_dataloaders[split_nameidx_map['test']]
+  valdata_loader = feature_dataloaders[split_nameidx_map['val']]
+
+  # Get the labels from the training set to get label-distribution
+  train_labels = []
+  with open(seq_df_filenames[split_nameidx_map['train']], 'r') as f:
+    lines = f.readlines()
+    for l in lines:
+      train_labels.append(int(l.split(',')[0]))
 
 elif args.operation_mode == 'image_seq':
   # Contains a list of strings of the format 'seq_label, seq_img1_path, seq_img2_path, seq_img3_path ...'
@@ -215,17 +221,32 @@ elif args.operation_mode == 'image_seq':
   testdata_loader = feature_extractor.create_dataloader(test_data, split_type='test', data_type='image_seq')
   valdata_loader = feature_extractor.create_dataloader(val_data, split_type='val', data_type='image_seq')
 
+  # Get the labels from the training set to get label-distribution
+  train_labels = []
+  for l in train_data:
+    train_labels.append(int(l.split(',')[0]))
+
 else:
     assert 0, 'Not implemented'
+
+#Figure out the relative frequencies of training data labels and inversely weigh the cost function
+label_count_dict = dict(collections.Counter(train_labels))
+labels_list = label_count_dict.keys(); labels_list.sort()
+labels_hist = []
+for l in labels_list:
+  labels_hist.append(label_count_dict[l])
+labels_importance = [sum(labels_hist)/float(x) for x in labels_hist]
+labels_importance = np.array([x/sum(labels_importance) for x in labels_importance]) #normalize
+
 
 lstm_model = lstm.RNNModel('LSTM', feat_size_map[args.feature_extractortype], args.nhid, args.nlayers,
                            dataset.get_numclasses(), args.lstm_dropout, args.lstm_init)
 lstm_model.cuda()
 
-lstm_criterion = nn.CrossEntropyLoss()
+lstm_criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(labels_importance).cuda())
 lstm_optimizer = torch.optim.SGD(lstm_model.parameters(), args.lr,
-                            momentum=args.momentum,
-                            weight_decay=args.weight_decay)
+                                 momentum=args.momentum,
+                                 weight_decay=args.weight_decay)
 
 
 def accuracy(output, target, topk=(1,)):
@@ -243,7 +264,6 @@ def accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
-
 def train():
   global global_step
   lstm_model.train()
@@ -251,10 +271,10 @@ def train():
   start_time = time.time()
   zero_batch_time = time.time()
 
-  for batch_idx, (train_seq, train_label, _) in enumerate(traindata_loader):
+  for batch_idx, (train_seq, train_label, train_files) in enumerate(traindata_loader):
     num_batchsamples = train_seq.size(0)
     hidden = lstm_model.init_hidden(num_batchsamples)
-    lstm_label = Variable(torch.cat([train_label.unsqueeze(0)] * args.sequence_length).view(-1).cuda())
+    lstm_label = Variable(train_label.cuda())
 
     if args.operation_mode == 'image_seq':
       train_seq = Variable(train_seq.cuda(), volatile=True)
@@ -277,11 +297,13 @@ def train():
     if featmean_present:
       lstm_input.data = lstm_input.data - feature_mean.repeat(1, num_batchsamples, 1)
 
-
     output, hidden = lstm_model(lstm_input, hidden)
-    loss = lstm_criterion(output.view(-1, dataset.get_numclasses()),
+    
+    # Consider only last time step's output for eval
+    loss = lstm_criterion(output.narrow(0, args.sequence_length-1, 1).squeeze(),
                           lstm_label)
-    train_prec1, train_prec5 = accuracy(output.view(-1, dataset.get_numclasses()).data, lstm_label.data, topk=(1, 5))
+    #train_prec1, train_prec5 = accuracy(output.view(-1, dataset.get_numclasses()).data, lstm_label.data, topk=(1, 5))
+    train_prec1, train_prec5 = accuracy(output.narrow(0, args.sequence_length-1, 1).squeeze().data, lstm_label.data, topk=(1, 5))
     total_prec1 += train_prec1[0]; total_prec5 += train_prec5[0]
     loss.backward()
     lstm_optimizer.step()
@@ -319,11 +341,10 @@ def evaluate(loader):
   lstm_model.eval()
   num_batchesprocessed = 0
   total_prec1 = 0; total_prec5 = 0
-  for batch_idx, (eval_seq, eval_label, _) in enumerate(loader):
-    num_batchsamples = eval_seq.size(0)  # Hack, to avoid running into incomplete batches
+  for batch_idx, (eval_seq, eval_label, eval_files) in enumerate(loader):  
+    num_batchsamples = eval_seq.size(0)
     hidden = lstm_model.init_hidden(num_batchsamples)
-
-    lstm_label = Variable(torch.cat([eval_label.unsqueeze(0)] * args.sequence_length).view(-1).cuda())
+    lstm_label = Variable(eval_label.cuda())
 
     if args.operation_mode == 'image_seq':
       eval_seq = Variable(eval_seq.cuda(), volatile=True)
@@ -345,9 +366,10 @@ def evaluate(loader):
     # subtract training sequence mean is available
     if featmean_present:
       lstm_input.data = lstm_input.data - feature_mean.repeat(1, num_batchsamples, 1)
-
+    
     output, hidden = lstm_model(lstm_input, hidden)
-    output_flat = output.view(-1, dataset.get_numclasses())
+    #output_flat = output.view(-1, dataset.get_numclasses())
+    output_flat = output.narrow(0, args.sequence_length-1, 1).squeeze()
     eval_prec1, eval_prec5 = accuracy(output_flat.data, lstm_label.data, topk=(1, 5))
     total_prec1 += eval_prec1[0]; total_prec5 += eval_prec5[0]
 
@@ -370,9 +392,12 @@ def adjust_learning_rate2(optimizer, _epoch):
     param_group['lr'] = _lr
   return _lr
 
-
 # tensorboard structures
-foldername = str(datetime.datetime.now()).replace(' ', '_').replace(':', '_')
+if args.run_name == '':
+  foldername = str(datetime.datetime.now()).replace(' ', '_').replace(':', '_')
+else:
+  foldername = args.run_name + '_' + str(datetime.datetime.now()).replace(' ', '_').replace(':', '_')
+
 tf_summary_folder = os.path.join(args.tfboard_dir, foldername)
 tf_summary_writer = tf.summary.FileWriter(tf_summary_folder)
 model_save_path = os.path.join(tf_summary_folder, 'lstm_model_%06d.pt')
@@ -388,7 +413,7 @@ try:
   for epoch in range(1, args.epochs+1):
       #lr = adjust_learning_rate2(lstm_optimizer, epoch)
       epoch_start_time = time.time()
-      train()
+      train()      
       val_loss, val_top1, val_top5 = evaluate(valdata_loader)
 
       # Log data to tensorflow tensorboard
@@ -417,12 +442,12 @@ try:
         print('Exiting from training due to low value of learning rate')
         break
 
-
 except KeyboardInterrupt:
     print('-' * 89)
     print('Exiting from training early')
 
 # Load the best saved model.
+print('Loading model from %s for test'%model_save_path%saved_epoch)
 with open(model_save_path%saved_epoch, 'rb') as f:
   lstm_model = torch.load(f)
 
