@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 import glob
 from model import  cnn
+import time
 
 
 parser = argparse.ArgumentParser(description='Compute feature mean for LSTM input from training data')
@@ -36,10 +37,12 @@ assert args.feature_extractortype in args.feature_metadatafile, 'Stored features
 
 feature_mean = np.zeros((1, feat_size_map[args.feature_extractortype]))
 
+t1 = time.time()
 for batch_idx, (seq, label, _) in enumerate(feature_dataloader):
 
   if (batch_idx%10 == 0):
-    print '\r %06d/%06d'%(batch_idx, len(seq_feature_files)//args.batch_size),
+    print '\r %06d/%06d samples per sec : %.2f'%(batch_idx, len(seq_feature_files)//args.batch_size, 10*args.batch_size/(time.time()-t1)),
+    t1 = time.time()
     sys.stdout.flush()
 
   array = seq.view(-1, feat_size_map[args.feature_extractortype]).mean(0).numpy()
