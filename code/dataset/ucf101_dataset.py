@@ -33,12 +33,11 @@ class ucf101Dataset:
     self._train_images = []
     self._test_images = []
     self._val_images = []
-
-
-
     self._class_ind_dict = {}
+
     with open(class_indfile, 'r') as f:
       entries = f.read().splitlines()
+
     for e in entries:
       frags = e.split(' ')
       self._class_ind_dict[frags[1]] = int(frags[0])-1
@@ -57,7 +56,7 @@ class ucf101Dataset:
     if self._train_splitfile is not None:
       with open(self._train_splitfile, 'r') as f:
         videos = f.read().splitlines()
-      random.seed(0)
+      random.seed(10)
       random.shuffle(videos)
 
       val_videos = videos[:int(self._val_ratio*len(videos))]
@@ -78,8 +77,6 @@ class ucf101Dataset:
     else:
       return self._test_videos_folders, self._test_video_labels
 
-
-
   def create_seq_pkl(self, split_type='train'):
     assert split_type in  ['train', 'val', 'test']
 
@@ -99,10 +96,8 @@ class ucf101Dataset:
       video_folders = self._test_videos_folders
       video_labels = self._test_video_labels
 
-
     if os.path.exists(pkl_file) and os.path.exists(imglist_file):
-      print 'Pickle files for subset %s with dataframe are already present at %s, %s'%(split_type, pkl_file,
-                                                                                       imglist_file)
+      print 'Pickle files for subset %s with dataframe are already present at %s, %s'%(split_type, pkl_file, imglist_file)
       return False
 
     print 'Preparing the csv file %s for subset : %s ....'%(pkl_file, split_type)
@@ -145,11 +140,7 @@ class ucf101Dataset:
     imglist_df['label'] = split_image_labels
     imglist_df['images'] = split_images
     imglist_df.to_csv(imglist_file, header=None, index=None)
-
-
     return True
-
-
 
   def load_sequence_data(self, split_type='train'):
     assert split_type in ['train', 'val', 'test']
@@ -168,7 +159,6 @@ class ucf101Dataset:
     print ' ... loaded in %6f seconds'%(time.time()-t1)
     return data
 
-
   def load_imglist_data(self, split_type='train'):
     assert split_type in ['train', 'val', 'test']
 
@@ -186,9 +176,6 @@ class ucf101Dataset:
     print ' ... loaded in %6f seconds'%(time.time()-t1)
     sys.stdout.flush()
     return data
-  
-  
-
 
   def create_video_imgseqs(self, split_type='train', vid_idx=0):
     """For a given video, create a sequence of frames with given sequence length and corresponding stride"""
@@ -204,7 +191,6 @@ class ucf101Dataset:
       video_folder = self._test_videos_folders[vid_idx]
       video_label = self._test_video_labels[vid_idx]
 
-
     images = glob(os.path.join(video_folder, '*.jpg'))
     images.sort()
 
@@ -215,11 +201,7 @@ class ucf101Dataset:
       for x in images[l:l+self._seq_length]:
         s = s + ',' + x
       img_seqs.append(s)
-
     return img_seqs, video_label
-
-
-
   
 if __name__ == '__main__':
   ucf_dataset = ucf101Dataset(data_root='/media/brain/archith/video_analysis/UCF-101/UCF-101-images/',
