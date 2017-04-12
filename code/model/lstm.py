@@ -6,74 +6,72 @@ from numpy.linalg import svd
 from math import sqrt
 import numpy as np
 
+def _get_orthogonal_init_weights(size):
+    u, _, v = svd(normal(0.0, 1.0, size), full_matrices=False)
 
-def _get_orthogonal_init_weights(weights):
-    fan_out = weights.size(0)
-    fan_in = weights.size(1)
-
-    u, _, v = svd(normal(0.0, 1.0, (fan_out, fan_in)), full_matrices=False)
-
-    if u.shape == (fan_out, fan_in):
-        return torch.Tensor(u.reshape(weights.size()))
+    if u.shape == size:
+        return torch.Tensor(u.reshape(size))
     else:
-        return torch.Tensor(v.reshape(weights.size()))
+        return torch.Tensor(v.reshape(size))
 
-
-def _get_xavier_init_weights(params):
-    weight_shape = list(params.weight.data.size())
-    fan_in = weight_shape[1]
-    fan_out = weight_shape[0]
-    w_bound = np.sqrt(6. / (fan_in + fan_out))
-    params.weight.data.uniform_(-w_bound, w_bound)
-    params.bias.data.fill_(0)
-    nn.LSTM
-
-class RNNModel(nn.Module):
+class LSTMModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ninp, nhid, nlayers, noutput, dropout, init_type):
-        super(RNNModel, self).__init__()
-        if rnn_type in ['LSTM', 'RNN']:
-            self.rnn = getattr(nn, rnn_type)(ninp, nhid, nlayers, bias=True, dropout=dropout)
-            if nlayers < 2 and dropout > 0.0:
-                print 'INFO : With LSTM  of %d layers in LSTM, only decoder dropout will take effect'%(nlayers)
-        else:
-            assert 0, "Only LSTM and RNN types are supported"
-        self.decoder = nn.Linear(nhid, noutput)
-        self.drop = nn.Dropout(dropout)
-        self.init_weights(init_type)
+    def __init__(self, ninp, nhid, nlayers, noutput, dropout):
+        super(LSTMModel, self).__init__()
+        self.lstm = nn.LSTM(nhid, nhid, nlayers, bias=True, dropout=dropout)
+        if nlayers < 2 and dropout > 0.0:
+            print 'INFO : With LSTM  of %d layers in LSTM, only decoder dropout will take effect'%(nlayers)
 
-        self.rnn_type = rnn_type
+        self.encoder = nn.Linear(ninp, nhid)
+        self.decoder = nn.Linear(nhid, noutput)
+        self.drop1 = nn.Dropout(dropout)
+        self.drop2 = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+        
+        self.states = None
+        self.init_weights()
+
         self.nhid = nhid
         self.nlayers = nlayers
         self.noutput = noutput
 
+    def init_weights(self):
+        for weight in self.lstm.parameters():
+            size = weight.size()
+            if len(size) > 1:
+                h, w = size
+                size = (h // 4, w)
+                mat = torch.cat([_get_orthogonal_init_weights(size)
+                    for _ in range(4)])
+                weight.data.copy_(mat)
+            else:
+                weight.data.fill_(0)
+        self.encoder.weight.data *= sqrt(2) # due to relu
 
-    def init_weights(self, init_type='uniform'):
-        assert init_type in ['uniform', 'orthogonal', 'xavier']
-        if init_type == 'uniform':
-            initrange = 0.1
-            self.decoder.bias.data.fill_(0)
-            self.decoder.weight.data.uniform_(-initrange, initrange)
-        elif init_type == 'orthogonal':
-            self.decoder.weight.data.copy_(_get_orthogonal_init_weights(self.decoder.weight.data))
-            self.decoder.bias.data.fill_(0)
+
+    def forward(self, x):
+        n, b, d = x.size()
+        h, c = self.init_states(b)
+        x = self.encoder(x.view(-1, d)).view(n, b, -1)
+        x = self.relu(x)
+        x = self.drop1(x)
+        out, (h, c) = self.lstm(x, (h, c))
+        out = out.mean(0).view(b, -1)
+        x = self.drop2(out)
+        x = self.decoder(x)
+        return x
+
+    def init_states(self, b):
+        s = self.nhid
+        if self.states is None:
+            w = next(self.parameters()).data
+            self.states = (Variable(w.new(1, b, s).zero_()),
+                    Variable(w.new(1, b, s).zero_()))
+        elif self.states[0].size(1) != b:
+            for h in self.states:
+                h.data.resize_(1, b, s).zero_()
         else:
-            _get_xavier_init_weights(self.decoder)
-
-
-
-
-    def forward(self, input_, hidden):
-        output, hidden = self.rnn(input_, hidden)
-        output = self.drop(output)
-        decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
-        return decoded.view(output.size(0), output.size(1), decoded.size(1)), hidden
-
-    def init_hidden(self, bsz):
-        weight = next(self.parameters()).data
-        if self.rnn_type == 'LSTM':
-            return (Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()),
-                    Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()))
-        else:
-            return Variable(weight.new(self.nlayers, bsz, self.nhid).zero_())
+            for h in self.states:
+                h.data.zero_()
+        return self.states
