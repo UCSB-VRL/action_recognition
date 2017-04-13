@@ -2,6 +2,8 @@ import os
 import torch
 from torch.utils.data import Dataset
 
+import imageio as io
+import cv2
 from sklearn.model_selection import StratifiedKFold
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
@@ -59,7 +61,7 @@ class VideoList(Dataset):
             feat = feat[start:start+self.seq_length]
             feat = feat[None, ...]            # RxLxD, R = 1
         else:
-            R = 20 # Sample the first 20 sequences
+            R = 20 # Sample the 20 sequences
             S = (n-self.seq_length) // (R-1)
             sn, sd = feat.strides
             feat = as_strided(feat, shape=(R, self.seq_length, d), strides=(S*sn, sn, sd))
