@@ -60,6 +60,8 @@ parser.add_argument('-g', '--gpu', default='0', type=str, dest='gpu',
                     help='selected gpu id for current run')                    
 parser.add_argument('-j', '--workers', default=6, type=int, dest='workers',
                     help='number of data loading workers (default: 6)')
+parser.add_argument('--dataset-name', default='ucf101', dest='dataset_name',
+                    help='The dataset name"')
 
 args = parser.parse_args()
 print('=' * 89)
@@ -86,12 +88,19 @@ tf_summary_writer = tf.summary.FileWriter(tf_summary_folder)
 feat_size_map = { 'vgg16': 4096,
                   'resnet152': 2048
                 }
+if args.dataset_name == 'ucf101':
+  num_classes = 101
+elif args.dataset_name == 'hmdb51':
+  num_classes = 51
+else:
+  assert 0, 'Unexpected dataset-name : %s'%args.dataset_name
+
 
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 lstm_model = lstm.LSTMModel(feat_size_map[args.feature_extractortype], 
                            args.nhid, args.nlayers,
-                           101, 
+                           num_classes, 
                            args.dropout)
 lstm_model.cuda()
 
@@ -271,7 +280,7 @@ def validate(valid_loader, model, criterion, func, targets):
     output = func(output)     # softmax, (bxr)x101
     
     # mean probabilities over r sequences
-    output = output.view(b, -1, 101).mean(1).squeeze(1)
+    output = output.view(b, -1, num_classes).mean(1).squeeze(1)
     loss = criterion(torch.log(output), target_var) # needs logsoftmax
     outputs.append(output.data.cpu().numpy())
 
@@ -282,7 +291,7 @@ def validate(valid_loader, model, criterion, func, targets):
     top5.update(prec5[0], target.size(0))
 
   outputs = np.concatenate(outputs, axis=0)
-  mean_ap = mean_average_precision(outputs, targets)
+  mean_ap = mean_average_precision(outputs, targets, num_classes)
 
   return losses.avg, top1.avg, top5.avg, mean_ap
 
