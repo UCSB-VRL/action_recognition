@@ -66,11 +66,11 @@ class LSTMModel(nn.Module):
         s = self.nhid
         if self.states is None:
             w = next(self.parameters()).data
-            self.states = (Variable(w.new(1, b, s).zero_()),
-                    Variable(w.new(1, b, s).zero_()))
+            self.states = (Variable(w.new(self.nlayers, b, s).zero_()),
+                    Variable(w.new(self.nlayers, b, s).zero_()))
         elif self.states[0].size(1) != b:
             for h in self.states:
-                h.data.resize_(1, b, s).zero_()
+                h.data.resize_(self.nlayers, b, s).zero_()
         else:
             for h in self.states:
                 h.data.zero_()

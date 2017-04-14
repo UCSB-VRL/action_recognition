@@ -1,4 +1,4 @@
-import os
+import os, sys
 import torch
 from torch.utils.data import Dataset
 
@@ -26,7 +26,6 @@ class ImageList(Dataset):
     def __init__(self, root, videos):
         self.root = root
         self.videos = videos
-
 
     def __getitem__(self, index):
         vid = self.videos[index] # path to video folder (of images)
@@ -60,6 +59,7 @@ class VideoList(Dataset):
             start = np.random.randint(0, n-self.seq_length)
             feat = feat[start:start+self.seq_length]
             feat = feat[None, ...]            # RxLxD, R = 1
+
         else:
             R = 20 # Sample the 20 sequences
             S = (n-self.seq_length) // (R-1)
@@ -87,6 +87,7 @@ def class_dict(ids_file):
         for line in f:
             c, name = line.split()
             class2idx[name] = int(c) - 1
+
     return class2idx
 
 
@@ -99,6 +100,7 @@ def video_list(data_file, class2idx):
             c = name.split('/')[0]
             c = class2idx[c]
             data.append((name, c))
+
     return data
 
 def train_split(data, n_splits=5, select=0, seed=2017):
