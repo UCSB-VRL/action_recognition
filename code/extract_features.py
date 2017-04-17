@@ -6,7 +6,6 @@ import datetime
 import time
 
 import torch
-import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from model import cnn
 from dataset import data
