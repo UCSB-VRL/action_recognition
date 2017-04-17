@@ -59,26 +59,36 @@ class VideoList(Dataset):
             start = np.random.randint(0, n-self.seq_length)
             feat = feat[start:start+self.seq_length]
             feat = feat[None, ...]            # RxLxD, R = 1
+            frame_indexes = np.array(range(start, start+self.seq_length))
+            frame_indexes = frame_indexes[None, ...]
 
         else:
             R = 20 # Sample the 20 sequences
             S = (n-self.seq_length) // (R-1)
+            indexes = np.array(range(n))
+            
             sn, sd = feat.strides
-            feat = as_strided(feat, shape=(R, self.seq_length, d), strides=(S*sn, sn, sd))
-            feat = np.ascontiguousarray(feat) # RxLxD, R = 20
+            i_sn, = indexes.strides
 
-        return feat, c
+            feat = as_strided(feat, shape=(R, self.seq_length, d), strides=(S*sn, sn, sd))
+            indexes = as_strided(indexes, shape=(R, self.seq_length), strides=(S*i_sn, i_sn))
+
+            feat = np.ascontiguousarray(feat) # RxLxD, R = 20
+            frame_indexes = np.ascontiguousarray(indexes) # RxL
+
+        return feat, c, name, frame_indexes
 
     def __len__(self):
         return len(self.videos)
 
 
 def collate(batch):
-    x, y = zip(*batch)
+    x, y, z, w = zip(*batch)
     x = torch.cat([torch.from_numpy(a) for a in x])    # (bR)xLxD
+    w = torch.cat([torch.from_numpy(a) for a in w])    # (bR)xL
     x = x.permute(1, 0, 2).contiguous()                # Lx(bR)xD
     y = torch.LongTensor(y)
-    return x, y
+    return x, y, z, w
 
 
 def class_dict(ids_file):

@@ -4,7 +4,6 @@ import torch
 from numpy.random import normal
 from numpy.linalg import svd
 from math import sqrt
-import numpy as np
 
 def _get_orthogonal_init_weights(size):
     u, _, v = svd(normal(0.0, 1.0, size), full_matrices=False)
@@ -53,14 +52,14 @@ class LSTMModel(nn.Module):
     def forward(self, x):
         n, b, d = x.size()
         h, c = self.init_states(b)
-        x = self.encoder(x.view(-1, d)).view(n, b, -1)
-        x = self.relu(x)
-        x = self.drop1(x)
-        out, (h, c) = self.lstm(x, (h, c))
-        out = out.mean(0).view(b, -1)
-        x = self.drop2(out)
-        x = self.decoder(x)
-        return x
+        enc = self.encoder(x.view(-1, d)).view(n, b, -1)
+        enc = self.relu(enc)
+        enc = self.drop1(enc)
+        out, (h, c) = self.lstm(enc, (h, c))
+        out = out.mean(0).view(b, -1) # Mean across sequence length and then shape around batch size
+        out = self.drop2(out)
+        dec = self.decoder(out)
+        return dec
 
     def init_states(self, b):
         s = self.nhid
